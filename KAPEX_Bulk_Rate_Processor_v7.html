@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>K-APEX . Bulk Rate Processor . v6</title>
+<style>
+  :root{--bg:#f4f4f4;--card:#ffffff;--text:#1f2937;--muted:#6b7280;--gray:#575757;--orange:#f36f21;--ok:#10b981;--err:#ef4444;--border:#e5e7eb}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text)}
+  .wrap{max-width:1100px;margin:28px auto;padding:0 16px}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .title{font-weight:800;font-size:clamp(18px,2.8vw,26px);color:var(--gray)}
+  .badge{background:#fff7ed;border:1px solid #fed7aa;color:var(--orange);padding:4px 10px;border-radius:999px;font-weight:700;font-size:12px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:0 10px 20px rgba(0,0,0,.04)}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  .btn{background:var(--orange);color:#fff;border:none;border-radius:12px;padding:10px 14px;font-weight:700;cursor:pointer}
+  .btn.secondary{background:#fff;color:var(--orange);border:1px solid var(--orange)}
+  input[type="file"]{display:block}
+  .mini{font-size:12px;color:var(--muted)}
+  .log{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;background:#0b1020;color:#cbd5e1;padding:10px;border-radius:10px;max-height:280px;overflow:auto}
+  table{width:100%;border-collapse:collapse}
+  th,td{border-bottom:1px solid #eef2f7;padding:8px;vertical-align:top}
+  th{text-align:left;font-size:13px;color:#374151}
+  td{font-size:14px}
+  .err{color:var(--err);font-weight:600}
+  .ok{color:var(--ok);font-weight:700}
+  .grid{display:grid;gap:12px;grid-template-columns:repeat(12,1fr)}
+  .col-12{grid-column:span 12}.col-6{grid-column:span 6}.col-4{grid-column:span 4}
+  @media(max-width:820px){.col-6,.col-4{grid-column:span 12}}
+  details summary{cursor:pointer;font-weight:600;color:var(--gray)}
+  .kbd{font-family:ui-monospace,Menlo,Consolas,monospace;background:#f3f4f6;border:1px solid #e5e7eb;border-bottom-width:2px;padding:0 6px;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <span class="title">K-APEX . Bulk Rate Processor</span>
+      <span class="badge">v6 . bugfix for geocoding</span>
+    </div>
+  </header>
+
+  <div class="card" id="uploader">
+    <div class="grid">
+      <div class="col-12">
+        <div class="row">
+          <input id="csvFile" type="file" accept=".csv,text/csv" />
+          <button class="btn" id="processBtn">Process CSV</button>
+          <button class="btn secondary" id="downloadBtn" disabled>Download Results CSV</button>
+          <button class="btn secondary" id="templateBtn">Download Template CSV</button>
+        </div>
+        <div class="mini" style="margin-top:6px">
+          Required column: <span class="kbd">input_address</span>. Optional column: <span class="kbd">override_city_state_zip</span>.
+          If override matches a facility name, that facility is forced. Otherwise it is treated as a location override.
+        </div>
+      </div>
+
+      <div class="col-12">
+        <details>
+          <summary>Configuration . rate rules and facility list</summary>
+          <div class="mini" style="margin:10px 0 6px">Paste your facility list as JSON or JS-like objects. Parser accepts unquoted keys and trailing commas.</div>
+          <div class="grid">
+            <div class="col-6">
+              <label class="mini">Base charge</label>
+              <input id="baseCharge" type="number" step="0.01" value="200" />
+            </div>
+            <div class="col-6">
+              <label class="mini">Minimum charge</label>
+              <input id="minCharge" type="number" step="0.01" value="350" />
+            </div>
+            <div class="col-6">
+              <label class="mini">Round-trip multiplier</label>
+              <input id="rtx" type="number" step="0.1" value="2" />
+            </div>
+            <div class="col-6">
+              <label class="mini">Distance hard cap in miles . if exceeded, row errors out</label>
+              <input id="maxMiles" type="number" step="1" value="800" />
+            </div>
+            <div class="col-12">
+              <label class="mini">Per-location $/mile overrides . by facility name</label>
+              <textarea id="rpmJson" rows="14" style="width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px">
+{
+  "DEFAULT": 3.00,
+  "ATLANTA, GA - CSX & BNSF": 3.0,
+  "ATLANTA, GA - NS AUSTELL": 3.0,
+  "BALTIMORE, MD": 3.5,
+  "BOSTON, MA": 3.5,
+  "BUFFALO, NY": 5.0,
+  "CHARLESTON, SC": 3.0,
+  "CHARLOTTE, NC": 3.0,
+  "CHICAGO, IL  - UP JOLIET INTERMODAL TERMINAL GLOBAL 4 (I206)": 3.0,
+  "CHICAGO, IL -  NORFOLK SOUTHERN - LANDERS (I104)": 3.0,
+  "CHICAGO, IL - BNSF - CHICAGO - LPC (H572)": 3.0,
+  "CHICAGO, IL - CN RAIL - CHICAGO - HARVEY (I092)": 3.0,
+  "CHICAGO, IL - CP RAIL - CHICAGO, BENSENVILLE (J830)": 3.0,
+  "CHICAGO, IL - CSX (J470)": 3.0,
+  "CINCINNATI, OH": 3.0,
+  "CLEVELAND, OH": 3.0,
+  "COLUMBUS, OH": 3.0,
+  "DALLAS BNSF": 3.0,
+  "DALLAS UPRR": 3.0,
+  "DENVER - BNSF DENVER / UP DENVER": 5.0,
+  "DENVER - BNSF HUDSON": 5.0,
+  "DETROIT, MI": 3.0,
+  "EL PASO/SANTA TERESA, NM": 5.0,
+  "GREER, SC": 3.0,
+  "HOUSTON, TX - HOUSTON PORT": 3.0,
+  "INDIANAPOLIS, IN": 5.0,
+  "JACKSONVILLE, FL": 3.0,
+  "KANSAS CITY, KS - BNSF LOGISTICS PARK": 3.0,
+  "KANSAS CITY, KS - CPKC - KANSAS CITY / CSX KANSAS CITY": 3.0,
+  "KANSAS CITY, KS - NS VOLTZ / UP NEFF": 3.0,
+  "LA/LB, CA PORTS": 3.25,
+  "LOUISVILLE, KY": 3.0,
+  "MEMPHIS, TN - BNSF - MEMPHIS (SHELBY)": 3.0,
+  "MEMPHIS, TN - CN - INTERMODAL GATEWAY MEMPHIS": 3.0,
+  "MEMPHIS, TN - CSX - MEMPHIS": 3.0,
+  "MEMPHIS, TN - NS - ROSSVILLE,TN": 3.0,
+  "MEMPHIS, TN - UP - MARION, AR": 3.0,
+  "MIAMI, FL": 4.0,
+  "MINNEAPOLIS, MN / ST. PAUL, MN": 3.0,
+  "MOBILE, AL": 3.0,
+  "NASHVILLE, TN": 3.0,
+  "NEW ORLEANS, LA": 3.25,
+  "NEW YORK, NY": 4.0,
+  "NORFOLK, VA": 3.0,
+  "OAKLAND, CA": 3.5,
+  "OMAHA, NE / COUNCIL BLUFFS, IA": 3.0,
+  "PHILADELPHIA, PA": 5.0,
+  "PITTSBURGH, PA": 5.0,
+  "PORT EVERGLADES, FL": 5.0,
+  "PORTLAND OR": 3.5,
+  "SALT LAKE CITY, UT": 3.0,
+  "SAVANNAH, GA": 3.0,
+  "SEATTLE WA": 3.25,
+  "ST.LOUIS, MO": 3.0,
+  "TACOMA WA": 3.0,
+  "TAMPA, FL": 3.0,
+  "WILMINGTON, NC": 3.0,
+  "WORCESTER, MA": 5.0
+}
+              </textarea>
+              <div class="mini">Exact facility name match required for RPM. Otherwise DEFAULT applies.</div>
+            </div>
+            <div class="col-12">
+              <label class="mini">Facilities . paste your full list here</label>
+              <textarea id="facilitiesJson" rows="16" style="width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px">[
+  {name:"ATLANTA, GA - CSX & BNSF", type:"IPI", lat:33.545109, lon:-84.609939},
+  {name:"CHICAGO, IL - CN RAIL - CHICAGO - HARVEY (I092)", type:"IPI", lat:41.582582, lon:-87.646201},
+  {name:"MEMPHIS, TN - CN - INTERMODAL GATEWAY MEMPHIS", type:"IPI", lat:35.031884, lon:-90.151894},
+  {name:"MEMPHIS, TN - CSX - MEMPHIS", type:"IPI", lat:35.031884, lon:-90.151894},
+  {name:"CHICAGO, IL - CP RAIL - CHICAGO, BENSENVILLE (J830)", type:"IPI", lat:41.941386, lon:-87.894674},
+  {name:"CHICAGO, IL - BNSF - CHICAGO - LPC (H572)", type:"IPI", lat:41.393772, lon:-88.152065},
+  {name:"CHICAGO, IL  - UP JOLIET INTERMODAL TERMINAL GLOBAL 4 (I206)", type:"IPI", lat:41.458470, lon:-88.118630},
+  {name:"ATLANTA, GA - NS AUSTELL", type:"IPI", lat:33.822647, lon:-84.651274},
+  {name:"CHICAGO, IL -  NORFOLK SOUTHERN - LANDERS (I104)", type:"IPI", lat:41.756107, lon:-87.683117},
+  {name:"CHICAGO, IL - CSX (J470)", type:"IPI", lat:41.762825, lon:-87.799362},
+  {name:"MEMPHIS, TN - UP - MARION, AR", type:"IPI", lat:35.191874, lon:-90.257432},
+  {name:"HOUSTON, TX - HOUSTON PORT", type:"PORT", lat:29.673630, lon:-95.006670},
+  {name:"DETROIT, MI", type:"IPI", lat:42.316722, lon:-83.133398},
+  {name:"CINCINNATI, OH", type:"IPI", lat:39.121175, lon:-84.537791},
+  {name:"KANSAS CITY, KS - CPKC - KANSAS CITY / CSX KANSAS CITY", type:"IPI", lat:38.859078, lon:-94.559678},
+  {name:"MEMPHIS, TN - BNSF - MEMPHIS (SHELBY)", type:"IPI", lat:35.023622, lon:-89.900600},
+  {name:"NEW YORK, NY", type:"PORT", lat:40.668837, lon:-74.156747},
+  {name:"LA/LB, CA PORTS", type:"PORT", lat:33.782664, lon:-118.217784},
+  {name:"KANSAS CITY, KS - NS VOLTZ / UP NEFF", type:"IPI", lat:39.181953, lon:-94.427906},
+  {name:"MEMPHIS, TN - NS - ROSSVILLE,TN", type:"IPI", lat:35.005260, lon:-89.578705},
+  {name:"KANSAS CITY, KS - BNSF LOGISTICS PARK", type:"IPI", lat:38.767739, lon:-94.984948},
+  {name:"DALLAS UPRR", type:"IPI", lat:32.628501, lon:-96.680962},
+  {name:"COLUMBUS, OH", type:"IPI", lat:39.995573, lon:-82.828357},
+  {name:"LOUISVILLE, KY", type:"IPI", lat:38.114500, lon:-85.759700},
+  {name:"OMAHA, NE / COUNCIL BLUFFS, IA", type:"IPI", lat:41.216343, lon:-95.929840},
+  {name:"SAVANNAH, GA", type:"PORT", lat:32.127400, lon:-81.163200},
+  {name:"CHARLOTTE, NC", type:"IPI", lat:35.272334, lon:-80.908698},
+  {name:"DALLAS BNSF", type:"IPI", lat:32.964963, lon:-97.327672},
+  {name:"ST.LOUIS, MO", type:"IPI", lat:38.601750, lon:-90.315587},
+  {name:"NASHVILLE, TN", type:"IPI", lat:36.101542, lon:-86.756239},
+  {name:"NEW ORLEANS, LA", type:"IPI", lat:29.915698, lon:-90.101184},
+  {name:"WILMINGTON, NC", type:"PORT", lat:34.192767, lon:-77.945727},
+  {name:"NORFOLK, VA", type:"PORT", lat:36.872573, lon:-76.358894},
+  {name:"BALTIMORE, MD", type:"PORT", lat:39.258370, lon:-76.537550},
+  {name:"OAKLAND, CA", type:"PORT", lat:37.796856, lon:-122.304260},
+  {name:"CHARLESTON, SC", type:"PORT", lat:32.840553, lon:-79.953115},
+  {name:"BOSTON, MA", type:"PORT", lat:42.339765, lon:-71.035435},
+  {name:"SALT LAKE CITY, UT", type:"IPI", lat:40.771550, lon:-111.907986},
+  {name:"CLEVELAND, OH", type:"IPI", lat:41.563840, lon:-81.575457},
+  {name:"MOBILE, AL", type:"PORT", lat:30.666587, lon:-88.041873},
+  {name:"GREER, SC", type:"IPI", lat:34.930864, lon:-82.192319},
+  {name:"JACKSONVILLE, FL", type:"PORT", lat:30.394677, lon:-81.540770},
+  {name:"MINNEAPOLIS, MN / ST. PAUL, MN", type:"IPI", lat:44.968859, lon:-93.172196},
+  {name:"TAMPA, FL", type:"PORT", lat:27.919242, lon:-82.431773},
+  {name:"MIAMI, FL", type:"PORT", lat:25.771817, lon:-80.165674},
+  {name:"PORTLAND OR", type:"PORT", lat:45.638177, lon:-122.750626},
+  {name:"PORT EVERGLADES, FL", type:"PORT", lat:26.081660, lon:-80.120584},
+  {name:"SEATTLE WA", type:"PORT", lat:47.573856, lon:-122.348359},
+  {name:"TACOMA WA", type:"PORT", lat:47.266552, lon:-122.410226},
+  {name:"PITTSBURGH, PA", type:"IPI", lat:40.312725, lon:-79.900495},
+  {name:"DENVER - BNSF DENVER / UP DENVER", type:"IPI", lat:39.790500, lon:-104.994500},
+  {name:"DENVER - BNSF HUDSON", type:"IPI", lat:40.067600, lon:-104.628800},
+  {name:"INDIANAPOLIS, IN", type:"IPI", lat:39.746623, lon:-86.164181},
+  {name:"BUFFALO, NY", type:"IPI", lat:42.797787, lon:-78.834263},
+  {name:"PHILADELPHIA, PA", type:"PORT", lat:39.900862, lon:-75.116517},
+  {name:"WORCESTER, MA", type:"IPI", lat:42.224400, lon:-71.790708},
+  {name:"EL PASO/SANTA TERESA, NM", type:"IPI", lat:31.752711, lon:-106.493000}
+]</textarea>
+              <div class="mini">US bias in geocoding avoids Ontario, Canada style mismatches.</div>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div class="col-12">
+        <div class="result card" style="padding:0">
+          <div style="padding:12px 12px 0 12px">
+            <div class="row" style="justify-content:space-between">
+              <div class="mini">Processed rows. <span id="countOk" class="ok">0 ok</span> . <span id="countErr" class="err">0 errors</span></div>
+              <div class="mini">Units. miles . USD</div>
+            </div>
+          </div>
+          <div style="overflow:auto;padding:12px">
+            <table id="results">
+              <thead><tr>
+                <th>#</th><th>input_address</th><th>override_city_state_zip</th>
+                <th>Facility Used</th><th>One-way mi</th><th>Round-trip mi</th>
+                <th>$/mi used</th><th>Computed Rate</th><th>Error Message</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12">
+        <details>
+          <summary>Activity log</summary>
+          <div class="log" id="log"></div>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <div class="mini" style="margin-top:12px">
+    Sample CSV columns. <span class="kbd">input_address,override_city_state_zip</span>. Override can be a facility name or a location string.
+  </div>
+</div>
+
+<script>
+const $ = (sel)=>document.querySelector(sel);
+const logBox = $('#log');
+function logln(msg){ const t = new Date().toISOString().replace('T',' ').slice(0,19); logBox.textContent += `[${t}] ${msg}\n`; logBox.scrollTop = logBox.scrollHeight; }
+window.addEventListener('error', e => { logln('JS error . ' + (e.message||e.error)); });
+
+function tryParseJSON(txt, fallback){ try{ return JSON.parse(txt); }catch(e){ return fallback; } }
+function normalizeFacilities(text){
+  let t = text.replace(/(^|\s)\/\/.*$/gm, '');
+  t = t.replace(/,\s*([\]\}])/g, '$1');
+  t = t.replace(/(\bname|\btype|\blat|\blon)\s*:/g, '"$1":');
+  const trimmed = t.trim();
+  try { return JSON.parse(trimmed); } catch(e){}
+  const t2 = trimmed.replace(/'(.*?)'/g, '"$1"');
+  try { return JSON.parse(t2); } catch(e){}
+  return null;
+}
+function haversineMiles(lat1,lon1,lat2,lon2){
+  const toRad = d => d * Math.PI / 180;
+  const R = 3958.7613;
+  const dLat = toRad(lat2-lat1), dLon = toRad(lon2-lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*sin2(dLon/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  function sin2(x){ const s = Math.sin(x); return s*s; }
+}
+function dollars(x){ return isFinite(x) ? `$${x.toFixed(2)}` : ''; }
+
+function parseCSV(text){
+  const rows=[]; let i=0, field='', row=[], inQ=false;
+  while(i<text.length){
+    const c = text[i];
+    if(inQ){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field+='"'; i++; } else inQ = false;
+      }else field += c;
+    }else{
+      if(c === '"') inQ = true;
+      else if(c === ','){ row.push(field); field=''; }
+      else if(c === '\n' || c === '\r'){
+        if(c === '\r' && text[i+1] === '\n') i++;
+        row.push(field); rows.push(row); field=''; row=[];
+      }else field += c;
+    }
+    i++;
+  }
+  if(field.length || row.length){ row.push(field); rows.push(row); }
+  return rows;
+}
+function rowsToObjects(rows){
+  const header = rows[0].map(h=>h.trim());
+  const out = [];
+  for(let r=1;r<rows.length;r++){
+    const obj = {};
+    for(let c=0;c<header.length;c++) obj[header[c]] = (rows[r][c]??'').trim();
+    if(Object.values(obj).some(v=>v!=='') ) out.push(obj);
+  }
+  return {header, data: out};
+}
+
+const STATE_MAP = {"AL":"Alabama","AK":"Alaska","AZ":"Arizona","AR":"Arkansas","CA":"California","CO":"Colorado","CT":"Connecticut","DE":"Delaware","FL":"Florida","GA":"Georgia","HI":"Hawaii","ID":"Idaho","IL":"Illinois","IN":"Indiana","IA":"Iowa","KS":"Kansas","KY":"Kentucky","LA":"Louisiana","ME":"Maine","MD":"Maryland","MA":"Massachusetts","MI":"Michigan","MN":"Minnesota","MS":"Mississippi","MO":"Missouri","MT":"Montana","NE":"Nebraska","NV":"Nevada","NH":"New Hampshire","NJ":"New Jersey","NM":"New Mexico","NY":"New York","NC":"North Carolina","ND":"North Dakota","OH":"Ohio","OK":"Oklahoma","OR":"Oregon","PA":"Pennsylvania","RI":"Rhode Island","SC":"South Carolina","SD":"South Dakota","TN":"Tennessee","TX":"Texas","UT":"Utah","VT":"Vermont","VA":"Virginia","WA":"Washington","WV":"West Virginia","WI":"Wisconsin","WY":"Wyoming","DC":"District of Columbia"};
+function expandUSAddress(q){
+  const m = q.match(/^\s*([^,]+),\s*([A-Z]{2})(?:\s+\d{5}(?:-\d{4})?)?\s*$/i);
+  if(m){ const city = m[1].trim(); const st = m[2].toUpperCase(); if(STATE_MAP[st]) return `${city}, ${STATE_MAP[st]}, USA`; }
+  return q;
+}
+async function geocodeUS(q){
+  const q1 = expandUSAddress(q);
+  const url1 = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&q=${encodeURIComponent(q1)}&limit=3&addressdetails=0`;
+  let resp = await fetch(url1, {headers:{'Accept':'application/json'}});
+  if(resp.ok){
+    const arr = await resp.json();
+    if(arr && arr.length) return { lat: parseFloat(arr[0].lat), lon: parseFloat(arr[0].lon), ambiguous: arr.length>1 };
+  }
+  const q2 = /USA$/i.test(q1) ? q1 : `${q1}, USA`;
+  const url2 = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q2)}&limit=3&addressdetails=0`;
+  resp = await fetch(url2, {headers:{'Accept':'application/json'}});
+  if(!resp.ok) throw new Error(`Geocode HTTP ${resp.status}`);
+  const arr2 = await resp.json();
+  if(!arr2 || !arr2.length) throw new Error('No match found');
+  return { lat: parseFloat(arr2[0].lat), lon: parseFloat(arr2[0].lon), ambiguous: arr2.length>1 };
+}
+
+function normName(s){ return String(s||'').toUpperCase().replace(/\s+/g,' ').replace(/[\u2010-\u2015]/g,'-').trim(); }
+function matchFacility(name, facilities){
+  const n = normName(name); if(!n) return null;
+  let exact = facilities.find(f => normName(f.name) === n); if(exact) return exact;
+  let contains = facilities.find(f => normName(f.name).includes(n) || n.includes(normName(f.name))); if(contains) return contains;
+  const toks = n.split(/[^A-Z0-9]+/).filter(Boolean);
+  let best=null, bestScore=0;
+  for(const f of facilities){
+    const ftoks = normName(f.name).split(/[^A-Z0-9]+/).filter(Boolean);
+    const setA = new Set(toks), setB = new Set(ftoks);
+    const inter = [...setA].filter(t=>setB.has(t)).length;
+    const union = new Set([...setA, ...setB]).size || 1;
+    const score = inter/union;
+    if(score > bestScore){ bestScore = score; best = f; }
+  }
+  return bestScore >= 0.6 ? best : null;
+}
+
+function nearest(lat,lon, facilities){
+  let best=null;
+  for(const f of facilities){
+    const d = haversineMiles(lat,lon,f.lat,f.lon);
+    if(!best || d < best.dist) best = { ...f, dist:d };
+  }
+  return best;
+}
+
+function computeRate(roundTripMiles, facilityName, config){
+  const base = Number(config.baseCharge);
+  const minC = Number(config.minCharge);
+  const rpmMap = config.rpmMap || {};
+  const rpm = Number((facilityName in rpmMap) ? rpmMap[facilityName] : (rpmMap.DEFAULT ?? 3.00));
+  const raw = base + rpm * roundTripMiles;
+  const applied = Math.max(minC, raw);
+  return { rpm, raw, applied };
+}
+
+function downloadCSV(rows, filename='bulk_results.csv'){
+  const esc = (v)=> `"${String(v??'').replace(/"/g,'""')}"`;
+  const header = ['row','input_address','override_city_state_zip','facility_used','one_way_mi','round_trip_mi','rpm_used','computed_rate','error_message'];
+  const lines = [header.join(',')];
+  for(const r of rows){
+    lines.push([r.row, r.input_address, r.override_city_state_zip, r.facility_used, r.one_way_mi, r.round_trip_mi, r.rpm_used, r.computed_rate, r.error_message].map(esc).join(','));
+  }
+  const blob = new Blob([lines.join('\r\n')], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+function downloadTemplate(){
+  const header = 'input_address,override_city_state_zip\r\n';
+  const samples = [
+    'Ontario, CA,LA/LB, CA PORTS',
+    '1717 Middle Harbor Rd, Oakland, CA 94607,OAKLAND, CA',
+    '1 Main Gate Complex, Garden City, GA 31408,SAVANNAH, GA',
+    '585 W 53rd Pl, Denver, CO 80216,DENVER - BNSF HUDSON',
+    '805 S Santa Fe St, El Paso, TX 79901,EL PASO/SANTA TERESA, NM'
+  ].join('\r\n');
+  const blob = new Blob([header + samples + '\r\n'], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'bulk_template.csv'; a.click();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+
+const state = { results: [] };
+
+$('#processBtn').addEventListener('click', async ()=>{
+  const btn = $('#processBtn'); btn.disabled = true; btn.textContent = 'Processing...';
+  try {
+    const file = $('#csvFile').files?.[0];
+    if(!file){ alert('Choose a CSV file first'); return; }
+
+    let facilities = tryParseJSON($('#facilitiesJson').value, null);
+    if(!facilities){ facilities = normalizeFacilities($('#facilitiesJson').value); }
+    if(!Array.isArray(facilities) || facilities.length === 0){ alert('Facilities list is invalid. The parser could not normalize it.'); return; }
+    facilities = facilities.map(f=>({name:String(f.name), type:String(f.type||''), lat:Number(f.lat), lon:Number(f.lon)})).filter(f=>isFinite(f.lat) && isFinite(f.lon));
+
+    const rpmMap = tryParseJSON($('#rpmJson').value, {DEFAULT:3.0});
+    const cfg = { baseCharge:Number($('#baseCharge').value||200), minCharge:Number($('#minCharge').value||350), rtx:Number($('#rtx').value||2), maxMiles:Number($('#maxMiles').value||800), rpmMap };
+
+    $('#downloadBtn').disabled = true;
+    state.results = [];
+    $('#results tbody').innerHTML = '';
+    $('#countOk').textContent = '0 ok'; $('#countErr').textContent = '0 errors';
+
+    const text = await file.text();
+    const rows = parseCSV(text);
+    if(rows.length < 2){ alert('CSV has no data rows'); return; }
+    const {header, data} = rowsToObjects(rows);
+    if(!header.includes('input_address')){ alert('CSV missing required column "input_address"'); return; }
+    const hasOverride = header.includes('override_city_state_zip');
+
+    let ok=0, err=0, rowNum=0;
+
+    for(const row of data){
+      rowNum++;
+      const out = { row:rowNum, input_address:row.input_address??'', override_city_state_zip:hasOverride?(row.override_city_state_zip??''):'', facility_used:'', one_way_mi:'', round_trip_mi:'', rpm_used:'', computed_rate:'', error_message:'' };
+
+      const rawOverride = (out.override_city_state_zip || '').trim();
+      const overrideFacility = rawOverride ? matchFacility(rawOverride, facilities) : null;
+
+      const originAddr = (rawOverride && !overrideFacility) ? rawOverride : (out.input_address ?? '').trim();
+      if(!originAddr){ out.error_message='Missing input_address and no usable override provided'; err++; state.results.push(out); appendRow(out); continue; }
+
+      try{
+        const geo = await geocodeUS(originAddr);
+        const chosen = overrideFacility || nearest(geo.lat, geo.lon, facilities);
+        if(!chosen) throw new Error('No facilities available');
+        out.facility_used = `${chosen.name}`;
+
+        const oneWay = haversineMiles(geo.lat, geo.lon, chosen.lat, chosen.lon);
+        const rtMiles = oneWay * cfg.rtx;
+
+        out.one_way_mi = oneWay.toFixed(1);
+        out.round_trip_mi = rtMiles.toFixed(1);
+
+        if(rtMiles > cfg.maxMiles) throw new Error('Distance is too large, please choose an alternate routing or reach out to US.KApex.FCL.Trucking@KLN.COM');
+
+        const {rpm, applied} = computeRate(rtMiles, chosen.name, cfg);
+        out.rpm_used = rpm.toFixed(2);
+        out.computed_rate = dollars(applied);
+        ok++;
+      }catch(e){
+        out.error_message = String(e.message || e);
+        err++;
+      }
+
+      state.results.push(out);
+      appendRow(out);
+      $('#countOk').textContent = `${ok} ok`; $('#countErr').textContent = `${err} errors`;
+    }
+
+    $('#downloadBtn').disabled = state.results.length === 0;
+  } finally {
+    const btn2 = $('#processBtn'); btn2.disabled = false; btn2.textContent = 'Process CSV';
+  }
+});
+
+$('#downloadBtn').addEventListener('click', ()=>{ if(state.results.length === 0) return; downloadCSV(state.results, 'bulk_rate_results.csv'); });
+$('#templateBtn').addEventListener('click', downloadTemplate);
+
+function appendRow(r){
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td class="mini">${r.row}</td>
+    <td>${escapeHtml(r.input_address)}</td>
+    <td>${escapeHtml(r.override_city_state_zip)}</td>
+    <td>${escapeHtml(r.facility_used || '')}</td>
+    <td>${r.one_way_mi}</td>
+    <td>${r.round_trip_mi}</td>
+    <td>${r.rpm_used}</td>
+    <td><span class="${r.computed_rate ? 'ok':''}">${r.computed_rate}</span></td>
+    <td><span class="err">${escapeHtml(r.error_message || '')}</span></td>`;
+  $('#results tbody').appendChild(tr);
+}
+function escapeHtml(s){ return String(s??'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+</script>
+</body>
+</html>
