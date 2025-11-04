@@ -429,10 +429,6 @@ function downloadTemplate(){
   const header = 'input_address,override_city_state_zip\r\n';
   const samples = [
     'Ontario, CA,LA/LB, CA PORTS',
-    '1717 Middle Harbor Rd, Oakland, CA 94607,OAKLAND, CA',
-    '1 Main Gate Complex, Garden City, GA 31408,SAVANNAH, GA',
-    '585 W 53rd Pl, Denver, CO 80216,DENVER - BNSF HUDSON',
-    '805 S Santa Fe St, El Paso, TX 79901,EL PASO/SANTA TERESA, NM'
   ].join('\r\n');
   const blob = new Blob([header + samples + '\r\n'], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
