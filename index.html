@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>K-APEX . Bulk Rate Processor . v6</title>
+<title>K-APEX  Bulk Rate Processor  v8 (Driving Miles)</title>
 <style>
   :root{--bg:#f4f4f4;--card:#ffffff;--text:#1f2937;--muted:#6b7280;--gray:#575757;--orange:#f36f21;--ok:#10b981;--err:#ef4444;--border:#e5e7eb}
   *{box-sizing:border-box}
@@ -38,7 +38,7 @@
   <header>
     <div class="brand">
       <span class="title">K-APEX . Bulk Rate Processor</span>
-      <span class="badge">v6 . bugfix for geocoding</span>
+      <span class="badge">v8 . driving miles via API</span>
     </div>
   </header>
 
@@ -64,7 +64,7 @@
           <div class="grid">
             <div class="col-6">
               <label class="mini">Base charge</label>
-              <input id="baseCharge" type="number" step="0.01" value="200" />
+              <input id="baseCharge" type="number" step="0.01" value="250" />
             </div>
             <div class="col-6">
               <label class="mini">Minimum charge</label>
@@ -78,9 +78,15 @@
               <label class="mini">Distance hard cap in miles . if exceeded, row errors out</label>
               <input id="maxMiles" type="number" step="1" value="800" />
             </div>
+
+            <div class="col-12">
+              <label class="mini">Routing. Use an OpenRouteService API key for best results . leave blank to use OSRM demo (rate-limited)</label>
+              <input id="orsKey" type="password" placeholder="OpenRouteService API Key (optional)" />
+            </div>
+
             <div class="col-12">
               <label class="mini">Per-location $/mile overrides . by facility name</label>
-              <textarea id="rpmJson" rows="14" style="width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px">
+              <textarea id="rpmJson" rows="16" style="width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px">
 {
   "DEFAULT": 3.00,
   "ATLANTA, GA - CSX & BNSF": 3.0,
@@ -346,11 +352,50 @@ function matchFacility(name, facilities){
   return bestScore >= 0.6 ? best : null;
 }
 
-function nearest(lat,lon, facilities){
-  let best=null;
-  for(const f of facilities){
-    const d = haversineMiles(lat,lon,f.lat,f.lon);
-    if(!best || d < best.dist) best = { ...f, dist:d };
+// --- Routing helpers (true driving miles) ---
+async function routeMilesORS(o, d, key){
+  const url = 'https://api.openrouteservice.org/v2/directions/driving-car';
+  const body = JSON.stringify({coordinates:[[o.lon,o.lat],[d.lon,d.lat]]});
+  const resp = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json','Authorization':key}, body});
+  if(!resp.ok) throw new Error('ORS HTTP ' + resp.status);
+  const json = await resp.json();
+  const meters = json?.features?.[0]?.properties?.segments?.[0]?.distance;
+  if(!isFinite(meters)) throw new Error('ORS bad response');
+  return meters * 0.000621371;
+}
+async function routeMilesOSRM(o, d){
+  const url = `https://router.project-osrm.org/route/v1/driving/${o.lon},${o.lat};${d.lon},${d.lat}?overview=false`;
+  const resp = await fetch(url);
+  if(!resp.ok) throw new Error('OSRM HTTP ' + resp.status);
+  const json = await resp.json();
+  const meters = json?.routes?.[0]?.distance;
+  if(!isFinite(meters)) throw new Error('OSRM bad response');
+  return meters * 0.000621371;
+}
+async function routeMiles(o, d, key){
+  if(key){ try{ return await routeMilesORS(o,d,key); }catch(e){ logln('ORS failed . falling back to OSRM . ' + e.message); } }
+  try{ return await routeMilesOSRM(o,d); }catch(e){ throw e; }
+}
+
+// shortlist by haversine, then route to those to pick minimum
+async function nearestByDriving(origin, facilities, shortlist=6, orsKey=''){
+  const pre = facilities
+    .map(f => ({f, d: haversineMiles(origin.lat, origin.lon, f.lat, f.lon)}))
+    .sort((a,b)=>a.d-b.d)
+    .slice(0, Math.min(shortlist, facilities.length));
+  let best = null;
+  for(const cand of pre){
+    try{
+      const miles = await routeMiles(origin, {lat:cand.f.lat, lon:cand.f.lon}, orsKey);
+      if(!best || miles < best.miles) best = { f: cand.f, miles };
+    }catch(e){
+      logln(`Routing fail for ${cand.f.name} . ${e.message}`);
+    }
+  }
+  // fall back to haversine if all routing failed
+  if(!best){
+    const c0 = pre[0];
+    return { f: c0.f, miles: c0.d, fallback: true };
   }
   return best;
 }
@@ -407,6 +452,7 @@ $('#processBtn').addEventListener('click', async ()=>{
 
     const rpmMap = tryParseJSON($('#rpmJson').value, {DEFAULT:3.0});
     const cfg = { baseCharge:Number($('#baseCharge').value||200), minCharge:Number($('#minCharge').value||350), rtx:Number($('#rtx').value||2), maxMiles:Number($('#maxMiles').value||800), rpmMap };
+    const orsKey = ($('#orsKey').value||'').trim();
 
     $('#downloadBtn').disabled = true;
     state.results = [];
@@ -434,19 +480,37 @@ $('#processBtn').addEventListener('click', async ()=>{
 
       try{
         const geo = await geocodeUS(originAddr);
-        const chosen = overrideFacility || nearest(geo.lat, geo.lon, facilities);
-        if(!chosen) throw new Error('No facilities available');
-        out.facility_used = `${chosen.name}`;
 
-        const oneWay = haversineMiles(geo.lat, geo.lon, chosen.lat, chosen.lon);
+        let chosenFacility = overrideFacility;
+        let oneWay = NaN;
+        let routedFallback = false;
+
+        if(chosenFacility){
+          // Force facility . route origin->facility
+          try{
+            oneWay = await routeMiles(geo, {lat:chosenFacility.lat, lon:chosenFacility.lon}, orsKey);
+          }catch(e){
+            logln('Routing failed to forced facility . ' + e.message);
+            oneWay = haversineMiles(geo.lat, geo.lon, chosenFacility.lat, chosenFacility.lon);
+            routedFallback = true;
+          }
+        }else{
+          // Find nearest by driving miles using shortlist
+          const best = await nearestByDriving(geo, facilities, 6, orsKey);
+          chosenFacility = best.f;
+          oneWay = best.miles;
+          routedFallback = !!best.fallback;
+        }
+
+        out.facility_used = `${chosenFacility.name}${routedFallback ? ' (approx)' : ''}`;
+
         const rtMiles = oneWay * cfg.rtx;
-
         out.one_way_mi = oneWay.toFixed(1);
         out.round_trip_mi = rtMiles.toFixed(1);
 
         if(rtMiles > cfg.maxMiles) throw new Error('Distance is too large, please choose an alternate routing or reach out to US.KApex.FCL.Trucking@KLN.COM');
 
-        const {rpm, applied} = computeRate(rtMiles, chosen.name, cfg);
+        const {rpm, applied} = computeRate(rtMiles, chosenFacility.name, cfg);
         out.rpm_used = rpm.toFixed(2);
         out.computed_rate = dollars(applied);
         ok++;
